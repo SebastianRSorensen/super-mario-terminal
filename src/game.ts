@@ -2,7 +2,7 @@ import { GameState, Camera, Entity, TileType, EntityType, MarioState, GoombaStat
 import { TileMap } from './tiles/tilemap.js';
 import { getTileProps } from './tiles/tiles.js';
 import { Renderer } from './renderer.js';
-import { initInput, isKeyDown, wasKeyPressed, tickInput } from './input.js';
+import { initInput, updateInput, wasKeyPressed } from './input.js';
 import { updateCamera } from './camera.js';
 import { createMario, updateMarioInput, getMarioGravity, killMario } from './entities/mario.js';
 import { createGoomba } from './entities/goomba.js';
@@ -15,7 +15,7 @@ import {
 import { loadLevel } from './level/level-loader.js';
 import { LEVEL_1_1_ROWS, LEVEL_1_1_ENTITIES, LEVEL_1_1_ITEMS, MARIO_START_COL, MARIO_START_ROW } from './level/level-data.js';
 import { drawHud } from './ui/hud.js';
-import { drawTitleScreen, drawGameOverScreen, drawWinScreen } from './ui/screens.js';
+import { drawTitleScreen, drawGameOverScreen, drawWinScreen, drawPauseScreen } from './ui/screens.js';
 import * as C from './constants.js';
 import { LevelItemDef } from './types.js';
 
@@ -25,7 +25,7 @@ let camera: Camera;
 let tilemap: TileMap;
 let levelItems: LevelItemDef[];
 let levelEntities: typeof LEVEL_1_1_ENTITIES;
-let gameInterval: ReturnType<typeof setInterval>;
+let gameTimeout: ReturnType<typeof setTimeout>;
 let modeTimer = 0;
 
 export function initGame(): void {
@@ -69,25 +69,42 @@ function resetLevel(): void {
 
 function startGameLoop(): void {
   const TICK_MS = 1000 / C.TICK_RATE;
-  let lastTime = Date.now();
+  let lastTime = performance.now();
   let accumulator = 0;
 
-  gameInterval = setInterval(() => {
-    const now = Date.now();
-    accumulator += now - lastTime;
+  function gameLoop(): void {
+    const now = performance.now();
+    let frameTime = now - lastTime;
     lastTime = now;
 
-    let ticks = 0;
-    while (accumulator >= TICK_MS && ticks < 5) {
+    // Cap frame time to prevent spiral of death
+    if (frameTime > 250) frameTime = 250;
+
+    // Poll input once per frame, before physics
+    updateInput();
+
+    accumulator += frameTime;
+    let ticked = false;
+
+    while (accumulator >= TICK_MS) {
       update(C.DT);
       accumulator -= TICK_MS;
-      ticks++;
+      ticked = true;
     }
 
-    render();
-    tickInput();
-    state.frame++;
-  }, TICK_MS);
+    // Only render if at least one physics tick ran
+    if (ticked) {
+      render();
+      state.frame++;
+    }
+
+    // Self-scheduling: more accurate than setInterval
+    const elapsed = performance.now() - now;
+    const delay = Math.max(1, TICK_MS - elapsed);
+    gameTimeout = setTimeout(gameLoop, delay);
+  }
+
+  gameLoop();
 }
 
 function update(dt: number): void {
@@ -102,6 +119,9 @@ function update(dt: number): void {
       break;
     case 'playing':
       updatePlaying(dt);
+      break;
+    case 'paused':
+      updatePaused();
       break;
     case 'dying':
       updateDying(dt);
@@ -125,11 +145,23 @@ function updateTitle(): void {
   }
 }
 
+function updatePaused(): void {
+  if (wasKeyPressed('p')) {
+    state.mode = 'playing';
+  }
+}
+
 function updatePlaying(dt: number): void {
   const mario = state.mario;
 
+  // Pause
+  if (wasKeyPressed('p')) {
+    state.mode = 'paused';
+    return;
+  }
+
   // Update Mario input
-  updateMarioInput(mario);
+  updateMarioInput(mario, dt);
 
   // Apply gravity to Mario
   const gravity = getMarioGravity(mario);
@@ -201,7 +233,7 @@ function updatePlaying(dt: number): void {
       tilemap.get(marioCol, marioRow) === TileType.FLAG) {
     state.score += C.SCORE_FLAGPOLE;
     state.mode = 'win';
-    modeTimer = 120; // 4 seconds at 30fps
+    modeTimer = 240;
     return;
   }
 
@@ -224,7 +256,7 @@ function updateDying(dt: number): void {
     state.lives--;
     if (state.lives <= 0) {
       state.mode = 'gameover';
-      modeTimer = 90; // 3 seconds
+      modeTimer = 180;
     } else {
       state.mode = 'playing';
       resetLevel();
@@ -271,6 +303,10 @@ function render(): void {
       break;
     case 'win':
       drawWinScreen(renderer, state);
+      break;
+    case 'paused':
+      drawGame();
+      drawPauseScreen(renderer, state.frame);
       break;
     case 'playing':
     case 'dying':
@@ -357,7 +393,7 @@ function drawGame(): void {
   const marioScreenY = tileToScreenY(mario.y);
 
   // Invincibility flicker
-  const visible = mario.invincibleTimer <= 0 || state.frame % 4 < 2;
+  const visible = mario.invincibleTimer <= 0 || state.frame % 8 < 4;
 
   if (visible && marioScreenY >= hudRows && marioScreenY < viewRows && marioScreenX >= 0 && marioScreenX < viewCols) {
     const marioChar = mario.powerup === 'big' ? 'M' : 'm';
@@ -386,6 +422,6 @@ function drawClouds(camCol: number, levelTop: number): void {
 }
 
 export function cleanup(): void {
-  if (gameInterval) clearInterval(gameInterval);
+  if (gameTimeout) clearTimeout(gameTimeout);
   renderer?.cleanup();
 }

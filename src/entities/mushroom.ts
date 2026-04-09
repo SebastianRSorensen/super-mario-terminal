@@ -12,14 +12,14 @@ export function createMushroom(x: number, y: number): MushroomState {
     active: true,
     type: EntityType.MUSHROOM,
     emerging: true,
-    emergeTimer: 15,
+    emergeTimer: 30,
   };
 }
 
 export function updateMushroomEmerge(mushroom: MushroomState, dt: number): void {
   if (mushroom.emerging) {
     mushroom.emergeTimer--;
-    mushroom.y -= 0.05; // slowly rise out of block
+    mushroom.y -= 1.5 * dt; // 1.5 tiles/s rise rate
     if (mushroom.emergeTimer <= 0) {
       mushroom.emerging = false;
     }

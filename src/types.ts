@@ -43,6 +43,7 @@ export interface MarioState extends Entity {
   dead: boolean;
   jumpHeld: boolean;
   deathTimer: number;
+  coyoteTimer: number;
 }
 
 export interface GoombaState extends Entity {
@@ -66,7 +67,7 @@ export interface MushroomState extends Entity {
   emergeTimer: number;
 }
 
-export type GameMode = 'title' | 'playing' | 'dying' | 'gameover' | 'win';
+export type GameMode = 'title' | 'playing' | 'dying' | 'gameover' | 'win' | 'paused';
 
 export interface GameState {
   mode: GameMode;

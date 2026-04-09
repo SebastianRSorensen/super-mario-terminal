@@ -42,6 +42,6 @@ export function updateGoomba(goomba: GoombaState, tilemap: TileMap, dt: number):
 
 export function stompGoomba(goomba: GoombaState): void {
   goomba.dying = true;
-  goomba.dyingTimer = 10;
+  goomba.dyingTimer = 20;
   goomba.vx = 0;
 }

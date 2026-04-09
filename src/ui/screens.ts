@@ -2,6 +2,19 @@ import { Renderer } from '../renderer.js';
 import { COLOR_HUD_FG, COLOR_SKY_BG, COLOR_MARIO_FG } from '../constants.js';
 import { GameState } from '../types.js';
 
+export function drawPauseScreen(renderer: Renderer, frame: number): void {
+  const text = 'P A U S E D';
+  const col = Math.floor((renderer.width - text.length) / 2);
+  const row = Math.floor(renderer.height / 2);
+  renderer.drawString(col, row, text, COLOR_MARIO_FG, COLOR_SKY_BG);
+
+  if (frame % 80 < 56) {
+    const hint = 'PRESS P TO RESUME';
+    const hintCol = Math.floor((renderer.width - hint.length) / 2);
+    renderer.drawString(hintCol, row + 2, hint, COLOR_HUD_FG, COLOR_SKY_BG);
+  }
+}
+
 const TITLE_ART = [
   '  ____                        __  __            _       ',
   ' / ___| _   _ _ __   ___ _ __|  \\/  | __ _ _ __(_) ___  ',
@@ -29,7 +42,7 @@ export function drawTitleScreen(renderer: Renderer, frame: number): void {
   renderer.drawString(subCol, startRow + TITLE_ART.length + 1, TITLE_SUB, COLOR_HUD_FG, bg);
 
   // Blinking "PRESS SPACE TO START"
-  if (frame % 40 < 28) {
+  if (frame % 80 < 56) {
     const prompt = 'PRESS SPACE TO START';
     const col = Math.floor((renderer.width - prompt.length) / 2);
     renderer.drawString(col, startRow + TITLE_ART.length + 4, prompt, COLOR_HUD_FG, bg);

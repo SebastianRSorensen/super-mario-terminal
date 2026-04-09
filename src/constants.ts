@@ -1,8 +1,13 @@
 // Physics
-export const TICK_RATE = 30;
+export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
 export const GRAVITY = 55;
-export const MARIO_RUN_SPEED = 8;
+export const MARIO_ACCEL = 30;
+export const MARIO_DECEL = 25;
+export const MARIO_MAX_SPEED = 8;
+export const MARIO_AIR_ACCEL = 20;
+export const MARIO_AIR_DECEL = 5;
+export const TAP_MOVE_SPEED = 8;
 export const MARIO_JUMP_VELOCITY = -17;
 export const MARIO_JUMP_HOLD_GRAVITY = 25;
 export const TERMINAL_VELOCITY = 20;
@@ -21,9 +26,10 @@ export const SCORE_FLAGPOLE = 5000;
 // Gameplay
 export const STARTING_LIVES = 3;
 export const STARTING_TIME = 400;
-export const INVINCIBLE_FRAMES = 60;
-export const DEATH_ANIMATION_FRAMES = 60;
-export const COIN_POPUP_FRAMES = 20;
+export const INVINCIBLE_FRAMES = 120;
+export const DEATH_ANIMATION_FRAMES = 120;
+export const COIN_POPUP_FRAMES = 40;
+export const COYOTE_TIME = 0.08;
 
 // Level
 export const LEVEL_HEIGHT = 15;

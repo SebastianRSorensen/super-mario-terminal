@@ -1,12 +1,8 @@
 import { MarioState, EntityType } from '../types.js';
-import { isKeyDown, wasKeyPressed, isAnyKeyRecent } from '../input.js';
+import { isKeyDown, isKeyHeld, wasKeyPressed, consumeTap } from '../input.js';
 import * as C from '../constants.js';
 
-// Track whether Mario was moving horizontally when he left the ground
-let airborneVx = 0;
-
 export function createMario(x: number, y: number): MarioState {
-  airborneVx = 0;
   return {
     x, y,
     vx: 0, vy: 0,
@@ -20,50 +16,68 @@ export function createMario(x: number, y: number): MarioState {
     dead: false,
     jumpHeld: false,
     deathTimer: 0,
+    coyoteTimer: 0,
   };
 }
 
-export function updateMarioInput(mario: MarioState): void {
+export function updateMarioInput(mario: MarioState, dt: number): void {
   if (mario.dead) return;
 
-  // Horizontal movement
-  const leftDown = isKeyDown('left');
-  const rightDown = isKeyDown('right');
+  // Horizontal movement with acceleration/friction
+  const accel = mario.grounded ? C.MARIO_ACCEL : C.MARIO_AIR_ACCEL;
+  const decel = mario.grounded ? C.MARIO_DECEL : C.MARIO_AIR_DECEL;
 
-  if (leftDown) {
-    mario.vx = -C.MARIO_RUN_SPEED;
-    mario.facing = -1;
-  } else if (rightDown) {
-    mario.vx = C.MARIO_RUN_SPEED;
-    mario.facing = 1;
-  } else if (!mario.grounded && airborneVx !== 0 && isAnyKeyRecent()) {
-    // While airborne, maintain the horizontal speed we had when leaving
-    // the ground — but only if we were actually moving. Terminals only
-    // repeat one key at a time, so direction keys stop when jump is held.
-    mario.vx = airborneVx;
+  const leftHeld = isKeyHeld('left');
+  const rightHeld = isKeyHeld('right');
+  const leftTap = consumeTap('left');
+  const rightTap = consumeTap('right');
+
+  if (leftHeld || rightHeld) {
+    // Confirmed hold → full acceleration
+    let moveDir = 0;
+    if (leftHeld) moveDir -= 1;
+    if (rightHeld) moveDir += 1;
+    mario.vx += moveDir * accel * dt;
+    mario.vx = Math.max(-C.MARIO_MAX_SPEED, Math.min(C.MARIO_MAX_SPEED, mario.vx));
+    mario.facing = moveDir as -1 | 1;
+  } else if (leftTap || rightTap) {
+    // Single tap → impulse, then friction handles the rest
+    const tapDir = leftTap ? -1 : 1;
+    mario.vx = tapDir * C.TAP_MOVE_SPEED;
+    mario.facing = tapDir as -1 | 1;
   } else {
-    mario.vx = 0;
+    // No input → friction/deceleration
+    if (mario.vx > 0) {
+      mario.vx = Math.max(0, mario.vx - decel * dt);
+    } else if (mario.vx < 0) {
+      mario.vx = Math.min(0, mario.vx + decel * dt);
+    }
   }
 
-  // Snapshot horizontal velocity when leaving the ground
+  // Coyote time
   if (mario.grounded) {
-    airborneVx = mario.vx;
+    mario.coyoteTimer = C.COYOTE_TIME;
+  } else {
+    mario.coyoteTimer = Math.max(0, mario.coyoteTimer - dt);
   }
 
-  // Jump
-  const jumpKey = isKeyDown('up') || isKeyDown('space');
-  if (jumpKey && mario.grounded && !mario.jumpHeld) {
+  // Jump — edge-triggered via wasKeyPressed, hold-tracked via isKeyDown
+  const jumpPressed = wasKeyPressed('up') || wasKeyPressed('space');
+  const jumpHeldDown = isKeyDown('up') || isKeyDown('space');
+  const canJump = mario.grounded || mario.coyoteTimer > 0;
+
+  if (jumpPressed && canJump) {
     mario.vy = C.MARIO_JUMP_VELOCITY;
     mario.grounded = false;
+    mario.coyoteTimer = 0;
     mario.jumpHeld = true;
   }
-  if (!jumpKey) {
+  if (!jumpHeldDown) {
     mario.jumpHeld = false;
   }
 }
 
 export function getMarioGravity(mario: MarioState): number {
-  // Variable-height jump: lower gravity while holding jump and moving upward
   if (mario.jumpHeld && mario.vy < 0) {
     return C.MARIO_JUMP_HOLD_GRAVITY;
   }

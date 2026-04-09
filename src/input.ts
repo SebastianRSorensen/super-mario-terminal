@@ -1,21 +1,36 @@
-// Per-key state tracking
-interface KeyState {
-  lastSeenFrame: number;
-  holding: boolean; // true once key-repeat is detected
+// Three-state key tracking: inactive → tap → held → inactive
+// Distinguishes single taps (~1 cell nudge) from sustained holds (acceleration).
+// Held keys use global activity tracking to survive when another key steals
+// the terminal's repeat — the key stays held as long as ANY key is generating events.
+
+type KeyPhase = 'inactive' | 'tap' | 'held';
+
+interface KeyEntry {
+  phase: KeyPhase;
+  lastSeen: number;          // performance.now() timestamp
+  pressedThisFrame: boolean; // edge trigger, consumed on first read
+  tapConsumed: boolean;      // true once the 1-cell impulse has been applied
 }
 
-const keys = new Map<string, KeyState>();
-const pressedThisFrame = new Set<string>();
-let frameCounter = 0;
-let lastAnyInputFrame = 0;
+// TAP_WINDOW_MS: how long a tap stays active waiting for a repeat event.
+// Must exceed the OS key-repeat initial delay (~300-500ms) so holds are detected.
+const TAP_WINDOW_MS = 400;
 
-// Once key-repeat is detected, use a long hold to bridge gaps between repeats.
-// Before that, use a short hold so taps produce small movement.
-const TAP_HOLD = 3;         // 100ms — single tap ≈ 1 cell
-const REPEAT_HOLD = 10;     // 333ms — bridges gaps between key-repeat events
-// Window for detecting that a second event is a key-repeat (not a fresh press).
-// Must be longer than the OS key-repeat delay (~300-500ms).
-const REPEAT_DETECT = 18;   // 600ms
+// RELEASE_THRESHOLD_MS: how long a held key stays active between repeat events.
+// Also used as the global-silence threshold for releasing held keys.
+const RELEASE_THRESHOLD_MS = 150;
+
+// HELD_MAX_SILENCE_MS: absolute maximum time a held key stays active without
+// its own events, even if other keys are active. Covers edge case where player
+// releases a direction key while mashing other keys repeatedly.
+const HELD_MAX_SILENCE_MS = 1000;
+
+const keyMap = new Map<string, KeyEntry>();
+const eventQueue: string[] = [];
+let lastAnyKeyEvent = 0;
+
+// Opposing directions — pressing one cancels the other
+const OPPOSITES: Record<string, string> = { left: 'right', right: 'left', up: 'down', down: 'up' };
 
 export function initInput(): void {
   if (process.stdin.isTTY) {
@@ -24,22 +39,8 @@ export function initInput(): void {
   process.stdin.resume();
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (data: string) => {
-    for (const key of parseKeys(data)) {
-      const state = keys.get(key);
-      const gap = state ? frameCounter - state.lastSeenFrame : Infinity;
-
-      if (gap <= REPEAT_DETECT && state) {
-        // Event arrived within detection window → key-repeat confirmed
-        state.holding = true;
-        state.lastSeenFrame = frameCounter;
-      } else {
-        // Fresh press
-        keys.set(key, { lastSeenFrame: frameCounter, holding: false });
-        pressedThisFrame.add(key);
-      }
-
-      lastAnyInputFrame = frameCounter;
-    }
+    const keys = parseKeys(data);
+    eventQueue.push(...keys);
   });
 }
 
@@ -77,22 +78,100 @@ function parseKeys(data: string): string[] {
   return result;
 }
 
+export function updateInput(): void {
+  const now = performance.now();
+
+  // Clear per-frame edge triggers
+  for (const entry of keyMap.values()) {
+    entry.pressedThisFrame = false;
+  }
+
+  // Drain event queue — apply phase transitions
+  while (eventQueue.length > 0) {
+    const key = eventQueue.shift()!;
+    lastAnyKeyEvent = now;
+
+    let entry = keyMap.get(key);
+    if (!entry) {
+      entry = { phase: 'inactive', lastSeen: 0, pressedThisFrame: false, tapConsumed: false };
+      keyMap.set(key, entry);
+    }
+
+    if (entry.phase === 'inactive') {
+      // Fresh press → tap
+      entry.phase = 'tap';
+      entry.pressedThisFrame = true;
+      entry.tapConsumed = false;
+
+      // Cancel opposing direction to prevent both-active glitch
+      const opp = OPPOSITES[key];
+      if (opp) {
+        const oppEntry = keyMap.get(opp);
+        if (oppEntry && oppEntry.phase !== 'inactive') {
+          oppEntry.phase = 'inactive';
+        }
+      }
+    } else if (entry.phase === 'tap') {
+      // Second event while in tap → confirmed held
+      entry.phase = 'held';
+    }
+    // If already 'held', just refresh timestamp
+
+    entry.lastSeen = now;
+  }
+
+  // Timeout-based phase transitions
+  for (const entry of keyMap.values()) {
+    if (entry.phase === 'inactive') continue;
+    const elapsed = now - entry.lastSeen;
+
+    if (entry.phase === 'tap' && elapsed > TAP_WINDOW_MS) {
+      // Tap expired with no repeat → release
+      entry.phase = 'inactive';
+    } else if (entry.phase === 'held') {
+      const globalSilence = now - lastAnyKeyEvent;
+
+      if (elapsed > RELEASE_THRESHOLD_MS && globalSilence > RELEASE_THRESHOLD_MS) {
+        // No events from ANY key for 150ms → player released
+        entry.phase = 'inactive';
+      } else if (elapsed > HELD_MAX_SILENCE_MS) {
+        // Safety cap: don't hold forever even with other key activity
+        entry.phase = 'inactive';
+      }
+    }
+  }
+}
+
+// True when the key is in any active state (tap or held).
+// Used for jump hold detection (variable-height jump).
 export function isKeyDown(key: string): boolean {
-  const state = keys.get(key);
-  if (!state) return false;
-  const hold = state.holding ? REPEAT_HOLD : TAP_HOLD;
-  return (frameCounter - state.lastSeenFrame) <= hold;
+  const phase = keyMap.get(key)?.phase ?? 'inactive';
+  return phase !== 'inactive';
 }
 
+// True when the player is confirmed holding (repeat events detected).
+// Used for acceleration-based horizontal movement.
+export function isKeyHeld(key: string): boolean {
+  return keyMap.get(key)?.phase === 'held';
+}
+
+// Edge trigger — true only once per press, auto-consumed on first read.
 export function wasKeyPressed(key: string): boolean {
-  return pressedThisFrame.has(key);
+  const entry = keyMap.get(key);
+  if (entry?.pressedThisFrame) {
+    entry.pressedThisFrame = false;
+    return true;
+  }
+  return false;
 }
 
-export function isAnyKeyRecent(): boolean {
-  return (frameCounter - lastAnyInputFrame) <= REPEAT_HOLD;
-}
-
-export function tickInput(): void {
-  frameCounter++;
-  pressedThisFrame.clear();
+// Returns true once per tap to apply the initial impulse, then marks consumed.
+// Subsequent calls while still in tap phase return false (friction takes over).
+export function consumeTap(key: string): boolean {
+  const entry = keyMap.get(key);
+  if (entry?.phase === 'tap' && !entry.tapConsumed) {
+    entry.tapConsumed = true;
+    return true;
+  }
+  return false;
 }

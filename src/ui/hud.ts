@@ -18,7 +18,7 @@ export function drawHud(renderer: Renderer, state: GameState): void {
   renderer.drawString(2, 1, String(state.score).padStart(6, '0'), fg, bg);
 
   // Coins
-  const coinChar = state.frame % 16 < 8 ? '$' : 'o';
+  const coinChar = state.frame % 32 < 16 ? '$' : 'o';
   renderer.drawString(12, 1, `${coinChar}x${String(state.coins).padStart(2, '0')}`, 226, bg);
 
   // WORLD
