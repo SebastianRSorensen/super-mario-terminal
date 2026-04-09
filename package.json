@@ -1,0 +1,19 @@
+{
+  "name": "super-mario-terminal",
+  "version": "1.0.0",
+  "description": "Super Mario Bros for the terminal",
+  "type": "module",
+  "bin": {
+    "super-mario": "./dist/bin/mario.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/bin/mario.js",
+    "dev": "npx tsx bin/mario.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
